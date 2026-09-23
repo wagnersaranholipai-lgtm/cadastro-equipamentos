@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -148,6 +147,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--blue)}textarea{min-he
   </div>
 </section>
 
+<section id="clienteView" class="screen">
+  <div class="form-card card" style="max-width:850px">
+    <div style="text-align:center;margin-bottom:24px"><div class="logo" style="margin:0 auto 12px">WCS</div><h2>Acompanhamento do equipamento</h2><div class="subtitle">WCS GERADORES</div></div>
+    <div id="clientContent"></div>
+  </div>
+</section>
+
 <section id="tecnicos" class="screen">
   <div class="card" style="padding:22px">
     <div class="toolbar"><div><h2>Cadastro de técnicos</h2><div class="subtitle" style="margin:3px 0 0">Gerencie os responsáveis pelos serviços.</div></div><button class="btn primary" onclick="openTechModal()">➕ Novo técnico</button></div>
@@ -156,7 +162,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--blue)}textarea{min-he
 </section>
 
 <div id="techModal" class="modal"><div class="card">
-  <h2>Novo técnico</h2><div class="subtitle">Cadastre um técnico para aparecer na seleção de responsável.</div>
+  <h2 id="techModalTitle">Novo técnico</h2><div class="subtitle">Cadastre ou altere os dados do técnico.</div>
   <div class="field"><label>Nome do técnico</label><input id="techName" placeholder="Nome completo"></div>
   <div class="field" style="margin-top:12px"><label>Telefone</label><input id="techPhone" placeholder="Telefone / WhatsApp"></div>
   <div class="field" style="margin-top:12px"><label>E-mail</label><input id="techEmail" placeholder="E-mail"></div>
@@ -224,7 +230,7 @@ async function finalize(){
   const {error:he}=await sb.from('historico_status').insert({equipamento_id:e.id,status:'Recebido'});
   if(he)console.error(he);
   if(draft.photos.length){const rows=draft.photos.map(p=>({equipamento_id:e.id,nome_arquivo:p.name,caminho_arquivo:p.data}));const {error:pe}=await sb.from('fotos_equipamento').insert(rows);if(pe)console.error(pe)}
-  await loadAll();toast('Equipamento cadastrado online com sucesso!');showSupervisao()
+  await loadAll();toast('Equipamento cadastrado online com sucesso!');if(e.enviar_whatsapp){setTimeout(()=>sendWhatsAppForEquipment(e),250)}showSupervisao()
 }
 async function showSupervisao(){await loadAll();renderTable();showScreen('supervisao')}
 function renderTable(){const q=($('search')?.value||'').toLowerCase(),sf=$('statusFilter')?.value||'';const list=db.equipamentos.filter(e=>(!q||[e.equipamento,e.cliente,e.os,e.serie].join(' ').toLowerCase().includes(q))&&(!sf||e.status===sf));$('tbody').innerHTML=list.length?list.map(e=>{const t=db.tecnicos.find(t=>t.id===e.tecnicoId);return `<tr class="clickrow" onclick="openDetail('${e.id}')"><td><b>${esc(e.equipamento)}</b><br><small>${esc(e.modelo||'')}</small></td><td>${esc(e.cliente)}</td><td><span class="status ${statusClass(e.status)}">${e.status}</span></td><td>${esc(t?.nome||'-')}</td><td><b>${esc(e.os||'-')}</b></td><td>${fmt(e.entrada)}</td><td>${esc(e.entreguePor)}</td></tr>`}).join(''):`<tr><td colspan="7"><div class="empty">Nenhum equipamento encontrado.</div></td></tr>`}
@@ -234,14 +240,39 @@ async function selectTecnico(value){if(!currentId)return;const {error}=await sb.
 async function saveOS(){if(!currentId)return;const value=$('dOS').value.trim()||null;const {error}=await sb.from('equipamentos').update({numero_os:value}).eq('id',currentId);if(error){toast('Erro ao salvar OS.');console.error(error);return}const e=db.equipamentos.find(x=>x.id===currentId);if(e)e.os=value||'';toast('OS atualizada.');renderTable()}
 async function advanceStatus(id){const e=db.equipamentos.find(x=>x.id===id);if(!e)return;const selected=$('dTecnico')?.value||e.tecnicoId||'';if(selected!==e.tecnicoId){const {error}=await sb.from('equipamentos').update({tecnico_id:selected||null}).eq('id',id);if(error){toast('Erro ao salvar técnico.');return}e.tecnicoId=selected}const os=$('dOS')?.value.trim()||e.os||'';if(os!==e.os){const {error}=await sb.from('equipamentos').update({numero_os:os||null}).eq('id',id);if(error){toast('Erro ao salvar OS.');return}e.os=os}const next={'Recebido':'Levantamento de orçamento','Levantamento de orçamento':'Em execução','Em execução':'Finalizado'}[e.status];if(!next)return;if(next==='Levantamento de orçamento'&&!e.tecnicoId){toast('Selecione um técnico antes de avançar.');return}const {error}=await sb.from('equipamentos').update({status:next}).eq('id',id);if(error){toast('Erro ao atualizar status: '+error.message);return}const {error:he}=await sb.from('historico_status').insert({equipamento_id:id,status:next});if(he)console.error(he);toast('Status atualizado para: '+next);await loadAll();await openDetail(id)}
 function showTecnicos(){renderTechs();showScreen('tecnicos')}
-function renderTechs(){$('techList').innerHTML=db.tecnicos.length?db.tecnicos.map(t=>`<div class="tech"><b>👨‍🔧 ${esc(t.nome)}</b><p style="color:#9fb0bf">${esc(t.telefone||'Sem telefone')}<br>${esc(t.email||'Sem e-mail')}</p><span class="status ${t.ativo!==false?'s-exec':'s-fin'}">${t.ativo!==false?'ATIVO':'INATIVO'}</span><button class="btn ghost" style="float:right" onclick="toggleTech('${t.id}')">${t.ativo!==false?'Desativar':'Ativar'}</button></div>`).join(''):'<div class="empty" style="grid-column:1/-1">Nenhum técnico cadastrado.</div>'}
-function openTechModal(){$('techName').value='';$('techPhone').value='';$('techEmail').value='';$('techModal').classList.add('show')}
-function closeTechModal(){$('techModal').classList.remove('show')}
-async function saveTech(){const n=$('techName').value.trim();if(!n){toast('Informe o nome do técnico.');return}const {error}=await sb.from('tecnicos').insert({nome:n,telefone:$('techPhone').value.trim()||null,email:$('techEmail').value.trim()||null,ativo:true});if(error){toast('Erro ao cadastrar técnico.');console.error(error);return}closeTechModal();await loadAll();renderTechs();toast('Técnico cadastrado online.')}
+function renderTechs(){$('techList').innerHTML=db.tecnicos.length?db.tecnicos.map(t=>`<div class="tech"><b>👨‍🔧 ${esc(t.nome)}</b><p style="color:#9fb0bf">${esc(t.telefone||'Sem telefone')}<br>${esc(t.email||'Sem e-mail')}</p><span class="status ${t.ativo!==false?'s-exec':'s-fin'}">${t.ativo!==false?'ATIVO':'INATIVO'}</span><div style="display:flex;gap:7px;justify-content:flex-end;margin-top:12px"><button class="btn ghost" onclick="editTech('${t.id}')">✏️ Alterar</button><button class="btn danger" onclick="deleteTech('${t.id}')">🗑️ Excluir</button></div></div>`).join(''):'<div class="empty" style="grid-column:1/-1">Nenhum técnico cadastrado.</div>'}
+function openTechModal(id=''){editingTechId=id;const t=id?db.tecnicos.find(x=>x.id===id):null;$('techModalTitle').textContent=t?'Alterar técnico':'Novo técnico';$('techName').value=t?.nome||'';$('techPhone').value=t?.telefone||'';$('techEmail').value=t?.email||'';$('techModal').classList.add('show')}
+function editTech(id){openTechModal(id)}
+function closeTechModal(){editingTechId='';$('techModal').classList.remove('show')}
+async function saveTech(){const n=$('techName').value.trim();if(!n){toast('Informe o nome do técnico.');return}const payload={nome:n,telefone:$('techPhone').value.trim()||null,email:$('techEmail').value.trim()||null};let q;if(editingTechId){q=await sb.from('tecnicos').update(payload).eq('id',editingTechId)}else{q=await sb.from('tecnicos').insert({...payload,ativo:true})}if(q.error){toast('Erro ao salvar técnico: '+q.error.message);console.error(q.error);return}closeTechModal();await loadAll();renderTechs();toast(editingTechId?'Técnico alterado.':'Técnico cadastrado online.')}
+async function deleteTech(id){const t=db.tecnicos.find(x=>x.id===id);if(!t)return;if(!confirm(`Excluir o técnico "${t.nome}"?`))return;const {error}=await sb.from('tecnicos').delete().eq('id',id);if(error){toast('Erro ao excluir técnico: '+error.message);console.error(error);return}await loadAll();renderTechs();toast('Técnico excluído.')}
 async function toggleTech(id){const t=db.tecnicos.find(x=>x.id===id);if(!t)return;const {error}=await sb.from('tecnicos').update({ativo:t.ativo===false}).eq('id',id);if(error){toast('Erro ao alterar técnico.');return}await loadAll();renderTechs()}
 
+function getPublicBase(){return window.location.origin+window.location.pathname.replace(/\/$/,'')+'/'}
+function publicLink(token){return getPublicBase()+'?token='+encodeURIComponent(token)}
+function whatsappUrl(phone,text){const n=(phone||'').replace(/\D/g,'');const normalized=n.startsWith('55')?n:'55'+n;return 'https://wa.me/'+normalized+'?text='+encodeURIComponent(text)}
+function sendWhatsAppForEquipment(e){
+  if(!e || !e.whatsapp)return;
+  const link=publicLink(e.token);
+  const msg=`Olá, ${e.cliente}!\n\nSeu equipamento foi recebido pela WCS GERADORES.\n\n🔧 Equipamento: ${e.equipamento}\n📅 Entrada: ${fmt(e.entrada)}\n📌 Status: Recebido\n\nAcompanhe o andamento do serviço pelo link abaixo:\n${link}\n\nWCS GERADORES\nEnergia que move resultados.`;
+  window.open(whatsappUrl(e.telefone,msg),'_blank');
+}
+
+async function openClientByToken(token){
+  const {data,error}=await sb.from('equipamentos').select('*,tecnicos(nome)').eq('token_acompanhamento',token).maybeSingle();
+  if(error||!data){showScreen('clienteView');$('clientContent').innerHTML='<div class="empty">Link de acompanhamento inválido ou equipamento não encontrado.</div>';return}
+  renderClientView(data);showScreen('clienteView');
+}
+function renderClientView(e){
+  const stages=['Recebido','Levantamento de orçamento','Em execução','Finalizado'];const idx=stages.indexOf(e.status);
+  const pct=idx===0?8:idx===1?38:idx===2?70:100;
+  const canMsg=e.status==='Levantamento de orçamento';
+  $('clientContent').innerHTML=`<div class="info-grid"><div class="info"><small>Cliente</small><b>${esc(e.cliente)}</b></div><div class="info"><small>Equipamento</small><b>${esc(e.equipamento)}</b></div><div class="info"><small>Modelo</small><b>${esc(e.modelo||'-')}</b></div><div class="info"><small>Ordem de serviço</small><b>${esc(e.numero_os||'Ainda não informada')}</b></div></div><div style="margin:25px 0"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b>STATUS ATUAL</b><span class="status ${statusClass(e.status)}">${esc(e.status)}</span></div><div style="height:12px;background:#253442;border-radius:99px;overflow:hidden"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#1597ff,#18b879);border-radius:99px"></div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px;font-size:11px;color:#9fb0bf;text-align:center">${stages.map((s,i)=>`<span style="color:${i<=idx?'#eef4f8':'#71808d'}">${s}</span>`).join('')}</div></div><div class="card panel" style="box-shadow:none"><h3>Detalhes do atendimento</h3><p><b>Técnico responsável:</b> ${esc(e.tecnicos?.nome||'Ainda não definido')}</p><p><b>Data de entrada:</b> ${fmt(e.data_entrada)}</p></div>${canMsg?`<div class="customer-box"><h3>💬 Complementar o orçamento</h3><p style="color:#9fb0bf">Esqueceu de informar alguma coisa? Envie uma observação para nossa equipe.</p><textarea id="clientMsg" placeholder="Ex.: Também preciso trocar a tomada da parte frontal."></textarea><button class="btn primary" style="margin-top:10px;width:100%" onclick="sendClientMessage('${e.id}')">📩 Enviar observação</button></div>`:''}<div id="clientSent" style="margin-top:15px"></div>`;
+}
+async function sendClientMessage(id){const el=$('clientMsg');const text=el?.value.trim();if(!text){toast('Digite uma observação.');return}const {error}=await sb.from('mensagens_cliente').insert({equipamento_id:id,mensagem:text});if(error){toast('Não foi possível enviar a observação.');console.error(error);return}el.value='';$('clientSent').innerHTML='<div class="message">✅ Observação enviada para a WCS GERADORES.</div>'}
+
 // Carrega os dados assim que a página abre.
-(async()=>{await loadAll();})();
+(async()=>{await loadAll();const token=new URLSearchParams(window.location.search).get('token');if(token){await openClientByToken(token)}})();
 
 </script>
 </body>
