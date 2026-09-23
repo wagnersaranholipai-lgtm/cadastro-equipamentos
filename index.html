@@ -224,13 +224,44 @@ function readFiles(files){[...files].forEach(file=>{const r=new FileReader();r.o
 $('cameraInput').addEventListener('change',e=>readFiles(e.target.files));$('galleryInput').addEventListener('change',e=>readFiles(e.target.files));
 function renderPhotos(){$('photos').innerHTML=draft.photos.length?draft.photos.map((p,i)=>`<div class="photo"><img src="${p.data}"><button onclick="draft.photos.splice(${i},1);renderPhotos()">×</button></div>`).join(''):'<div class="empty" style="width:100%;padding:25px">Nenhuma foto adicionada.</div>'}
 async function finalize(){
+  // Abre a janela do WhatsApp imediatamente, ainda dentro do clique do usuário.
+  // Isso evita que Chrome/Android bloqueie a abertura como pop-up depois do await do Supabase.
+  const waWindow = $('whatsapp').checked ? window.open('about:blank','_blank') : null;
+
   const payload={cliente:$('cliente').value.trim(),entregue_por:$('entreguePor').value.trim(),telefone:$('telefone').value.trim(),cpf_cnpj:$('cpfcnpj').value.trim()||null,email:$('email').value.trim()||null,enviar_whatsapp:$('whatsapp').checked,equipamento:$('equipamento').value.trim()||'Equipamento não informado',modelo:$('modelo').value.trim()||null,numero_serie:$('serie').value.trim()||null,horas_trabalhadas:$('horas').value.trim()||null,numero_chassi:$('chassi').value.trim()||null,data_entrada:new Date($('entrada').value).toISOString(),observacoes:$('obsEquip').value.trim()||null,observacoes_fotos:$('obsFotos').value.trim()||null,status:'Recebido'};
+
   const {data:e,error}=await sb.from('equipamentos').insert(payload).select().single();
-  if(error){console.error(error);toast('Erro ao cadastrar: '+error.message);return}
+  if(error){
+    if(waWindow && !waWindow.closed) waWindow.close();
+    console.error(error);toast('Erro ao cadastrar: '+error.message);return
+  }
+
   const {error:he}=await sb.from('historico_status').insert({equipamento_id:e.id,status:'Recebido'});
   if(he)console.error(he);
-  if(draft.photos.length){const rows=draft.photos.map(p=>({equipamento_id:e.id,nome_arquivo:p.name,caminho_arquivo:p.data}));const {error:pe}=await sb.from('fotos_equipamento').insert(rows);if(pe)console.error(pe)}
-  await loadAll();toast('Equipamento cadastrado online com sucesso!');if(e.enviar_whatsapp){setTimeout(()=>sendWhatsAppForEquipment(e),250)}showSupervisao()
+
+  if(draft.photos.length){
+    const rows=draft.photos.map(p=>({equipamento_id:e.id,nome_arquivo:p.name,caminho_arquivo:p.data}));
+    const {error:pe}=await sb.from('fotos_equipamento').insert(rows);
+    if(pe)console.error(pe)
+  }
+
+  // Monta e abre a conversa somente depois que o cadastro foi confirmado.
+  if(e.enviar_whatsapp){
+    const link=publicLink(e.token);
+    const msg=`Olá, ${e.cliente}!\n\nSeu equipamento foi recebido pela WCS GERADORES.\n\n🔧 Equipamento: ${e.equipamento}\n📅 Entrada: ${fmt(e.data_entrada)}\n📌 Status: Recebido\n\nAcompanhe o andamento do serviço pelo link abaixo:\n${link}\n\nWCS GERADORES\nEnergia que move resultados.`;
+    const url=whatsappUrl(e.telefone,msg);
+    if(waWindow && !waWindow.closed){
+      waWindow.location.href=url;
+    }else{
+      // Fallback caso o navegador bloqueie a nova janela.
+      window.location.href=url;
+      return;
+    }
+  }
+
+  await loadAll();
+  toast('Equipamento cadastrado online com sucesso!');
+  showSupervisao()
 }
 async function showSupervisao(){await loadAll();renderTable();showScreen('supervisao')}
 function renderTable(){const q=($('search')?.value||'').toLowerCase(),sf=$('statusFilter')?.value||'';const list=db.equipamentos.filter(e=>(!q||[e.equipamento,e.cliente,e.os,e.serie].join(' ').toLowerCase().includes(q))&&(!sf||e.status===sf));$('tbody').innerHTML=list.length?list.map(e=>{const t=db.tecnicos.find(t=>t.id===e.tecnicoId);return `<tr class="clickrow" onclick="openDetail('${e.id}')"><td><b>${esc(e.equipamento)}</b><br><small>${esc(e.modelo||'')}</small></td><td>${esc(e.cliente)}</td><td><span class="status ${statusClass(e.status)}">${e.status}</span></td><td>${esc(t?.nome||'-')}</td><td><b>${esc(e.os||'-')}</b></td><td>${fmt(e.entrada)}</td><td>${esc(e.entreguePor)}</td></tr>`}).join(''):`<tr><td colspan="7"><div class="empty">Nenhum equipamento encontrado.</div></td></tr>`}
