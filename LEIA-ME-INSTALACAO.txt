@@ -1,1 +1,0 @@
-Mantenha index.html, manifest.webmanifest, sw.js e icons/icon-192.png + icons/icon-512.png. Publique no GitHub Pages. Não altere o Supabase.
